@@ -12,6 +12,8 @@ import {
   Activity,
   Clock
 } from "lucide-react"
+import { InteractiveAreaChart } from "@/components/dashboard/interactive-area-chart"
+import { ApiUsageTable } from "@/components/dashboard/api-usage-table"
 
 export default function DashboardPage() {
   return (
@@ -81,6 +83,10 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      <InteractiveAreaChart />
+
+      <ApiUsageTable />
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
         <Card className="col-span-4">

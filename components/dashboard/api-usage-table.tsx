@@ -10,9 +10,34 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
-import { GripVertical } from "lucide-react"
+import { GripVertical, TrendingUp, TrendingDown } from "lucide-react"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
+import { Separator } from "@/components/ui/separator"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
+import {
+  ChartConfig,
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@/components/ui/chart"
 
 type UsageStatus = "active" | "warning" | "exceeded"
 
@@ -92,6 +117,34 @@ const initialData: UsageData[] = [
   }
 ]
 
+// Generate chart data for detail view
+const generateDetailChartData = () => {
+  const data = []
+  const now = new Date()
+
+  for (let i = 6; i >= 0; i--) {
+    const date = new Date(now)
+    date.setDate(date.getDate() - i)
+
+    const baseValue = 20000 + Math.random() * 10000
+    const usage = Math.floor(baseValue)
+
+    data.push({
+      date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      usage,
+    })
+  }
+
+  return data
+}
+
+const detailChartConfig = {
+  usage: {
+    label: "API Calls",
+    color: "hsl(217, 91%, 60%)",
+  },
+} satisfies ChartConfig
+
 const getStatusBadge = (status: UsageStatus) => {
   switch (status) {
     case "active":
@@ -108,6 +161,8 @@ export function ApiUsageTable() {
   const [selectedRows, setSelectedRows] = React.useState<Set<string>>(new Set())
   const [draggedItem, setDraggedItem] = React.useState<UsageData | null>(null)
   const [dragOverId, setDragOverId] = React.useState<string | null>(null)
+  const [selectedItem, setSelectedItem] = React.useState<UsageData | null>(null)
+  const [isSheetOpen, setIsSheetOpen] = React.useState(false)
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
@@ -175,19 +230,21 @@ export function ApiUsageTable() {
   const someSelected = selectedRows.size > 0 && selectedRows.size < data.length
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>API Usage Overview</CardTitle>
-        <CardDescription>
-          Current usage across all services and models
-          {selectedRows.size > 0 && ` (${selectedRows.size} selected)`}
-        </CardDescription>
-      </CardHeader>
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle>API Usage Overview</CardTitle>
+          <CardDescription>
+            Current usage across all services and models
+            {selectedRows.size > 0 && ` (${selectedRows.size} selected)`}
+          </CardDescription>
+        </CardHeader>
       <CardContent>
         <div className="rounded-md border">
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/50 hover:bg-muted/50">
+                <TableHead className="w-[30px]"></TableHead>
                 <TableHead className="w-[50px]">
                   <Checkbox
                     checked={allSelected}
@@ -196,7 +253,6 @@ export function ApiUsageTable() {
                     className={someSelected ? "data-[state=checked]:bg-primary/50" : ""}
                   />
                 </TableHead>
-                <TableHead className="w-[30px]"></TableHead>
                 <TableHead className="w-[200px] text-center">Type</TableHead>
                 <TableHead className="text-center">Status</TableHead>
                 <TableHead className="text-center">Target</TableHead>
@@ -214,12 +270,15 @@ export function ApiUsageTable() {
                   onDragLeave={handleDragLeave}
                   onDrop={(e) => handleDrop(e, item)}
                   onDragEnd={handleDragEnd}
-                  className={`cursor-move transition-colors ${
+                  className={`transition-colors ${
                     selectedRows.has(item.id) ? 'bg-muted/30' : ''
                   } ${draggedItem?.id === item.id ? 'opacity-50' : ''} ${
                     dragOverId === item.id ? 'border-t-2 border-primary' : ''
                   }`}
                 >
+                  <TableCell className="cursor-grab active:cursor-grabbing">
+                    <GripVertical className="h-4 w-4 text-muted-foreground" />
+                  </TableCell>
                   <TableCell>
                     <Checkbox
                       checked={selectedRows.has(item.id)}
@@ -227,10 +286,15 @@ export function ApiUsageTable() {
                       aria-label={`Select ${item.type}`}
                     />
                   </TableCell>
-                  <TableCell>
-                    <GripVertical className="h-4 w-4 text-muted-foreground" />
+                  <TableCell
+                    className="font-medium cursor-pointer hover:text-primary hover:underline"
+                    onClick={() => {
+                      setSelectedItem(item)
+                      setIsSheetOpen(true)
+                    }}
+                  >
+                    {item.type}
                   </TableCell>
-                  <TableCell className="font-medium">{item.type}</TableCell>
                   <TableCell>{getStatusBadge(item.status)}</TableCell>
                   <TableCell className="font-mono text-sm">{item.target}</TableCell>
                   <TableCell className="text-right font-mono text-sm">{item.limit}</TableCell>
@@ -242,5 +306,193 @@ export function ApiUsageTable() {
         </div>
       </CardContent>
     </Card>
+
+    <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
+      <SheetContent side="right" className="w-[400px] sm:w-[540px] overflow-y-auto" showCloseButton={false}>
+        {selectedItem && (
+          <div className="space-y-6 px-6 py-6">
+            {/* Title */}
+            <div className="space-y-1">
+              <h2 className="text-2xl font-semibold">{selectedItem.type}</h2>
+              <p className="text-sm text-muted-foreground">
+                Showing total API calls for the last 6 months
+              </p>
+            </div>
+
+            {/* Chart */}
+            <div className="rounded-lg border bg-card p-4">
+              <ChartContainer
+                config={detailChartConfig}
+                className="h-[200px] w-full"
+              >
+                <AreaChart
+                  data={generateDetailChartData()}
+                  margin={{
+                    top: 10,
+                    right: 10,
+                    left: 0,
+                    bottom: 0,
+                  }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis
+                    dataKey="date"
+                    tickLine={false}
+                    axisLine={false}
+                    tickMargin={8}
+                    tickFormatter={(value) => value}
+                    style={{ fontSize: '12px' }}
+                  />
+                  <YAxis
+                    tickLine={false}
+                    axisLine={false}
+                    tickMargin={8}
+                    tickFormatter={(value) => `${(value / 1000).toFixed(0)}k`}
+                    style={{ fontSize: '12px' }}
+                  />
+                  <ChartTooltip
+                    cursor={false}
+                    content={<ChartTooltipContent />}
+                  />
+                  <Area
+                    dataKey="usage"
+                    type="natural"
+                    fill="var(--color-usage)"
+                    fillOpacity={0.4}
+                    stroke="var(--color-usage)"
+                  />
+                </AreaChart>
+              </ChartContainer>
+            </div>
+
+            {/* Trend Indicator */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium">
+                Trending {selectedItem.status === "exceeded" ? "down" : "up"} by{" "}
+                {selectedItem.status === "exceeded" ? "-2.3" : "5.2"}% this month
+              </span>
+              {selectedItem.status === "exceeded" ? (
+                <TrendingDown className="h-4 w-4" />
+              ) : (
+                <TrendingUp className="h-4 w-4" />
+              )}
+            </div>
+
+            {/* Description */}
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              Showing total API calls for the last 6 months. This API model is currently being
+              monitored for usage patterns and performance metrics. The usage statistics help you
+              understand consumption patterns and plan capacity accordingly.
+            </p>
+
+            <Separator />
+
+            {/* Form Fields */}
+            <div className="space-y-4">
+              {/* Header */}
+              <div className="space-y-2">
+                <Label htmlFor="header" className="text-sm font-medium">
+                  Header
+                </Label>
+                <Input
+                  id="header"
+                  value={selectedItem.type}
+                  readOnly
+                  className="bg-muted/50"
+                />
+              </div>
+
+              {/* Type and Status */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="type" className="text-sm font-medium">
+                    Type
+                  </Label>
+                  <Select defaultValue={selectedItem.type}>
+                    <SelectTrigger id="type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={selectedItem.type}>{selectedItem.type}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="status" className="text-sm font-medium">
+                    Status
+                  </Label>
+                  <Select defaultValue={selectedItem.status}>
+                    <SelectTrigger id="status" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="warning">Warning</SelectItem>
+                      <SelectItem value="exceeded">Exceeded</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Target and Limit */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="target" className="text-sm font-medium">
+                    Target
+                  </Label>
+                  <Input
+                    id="target"
+                    value={selectedItem.target.split('/')[0]}
+                    readOnly
+                    className="bg-muted/50"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="limit" className="text-sm font-medium">
+                    Limit
+                  </Label>
+                  <Input
+                    id="limit"
+                    value={selectedItem.limit}
+                    readOnly
+                    className="bg-muted/50"
+                  />
+                </div>
+              </div>
+
+              {/* Reviewer */}
+              <div className="space-y-2">
+                <Label htmlFor="reviewer" className="text-sm font-medium">
+                  Reviewer
+                </Label>
+                <Select defaultValue={selectedItem.reviewer}>
+                  <SelectTrigger id="reviewer" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={selectedItem.reviewer}>{selectedItem.reviewer}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Action Buttons */}
+            <div className="space-y-3">
+              <Button className="w-full">
+                Submit
+              </Button>
+              <Button variant="outline" className="w-full">
+                Do
+              </Button>
+            </div>
+          </div>
+        )}
+      </SheetContent>
+    </Sheet>
+    </>
   )
 }

@@ -59,8 +59,16 @@ type TimeRange = "7days" | "30days" | "3months"
 
 export function InteractiveAreaChart() {
   const [timeRange, setTimeRange] = React.useState<TimeRange>("7days")
+  const [mounted, setMounted] = React.useState(false)
+
+  // Fix hydration issue: generate data only on client
+  React.useEffect(() => {
+    setMounted(true)
+  }, [])
 
   const data = React.useMemo(() => {
+    if (!mounted) return [] // Return empty array on server
+
     switch (timeRange) {
       case "7days":
         return generateMockData(7)
@@ -71,7 +79,7 @@ export function InteractiveAreaChart() {
       default:
         return generateMockData(7)
     }
-  }, [timeRange])
+  }, [timeRange, mounted])
 
   const total = React.useMemo(
     () => ({
@@ -80,6 +88,27 @@ export function InteractiveAreaChart() {
     }),
     [data]
   )
+
+  // Show loading state on server/initial render
+  if (!mounted) {
+    return (
+      <Card>
+        <CardHeader className="flex flex-col items-stretch space-y-0 border-b p-0 sm:flex-row">
+          <div className="flex flex-1 flex-col justify-center gap-1 px-6 py-5 sm:py-6">
+            <CardTitle>API Usage Analytics</CardTitle>
+            <CardDescription>
+              Loading chart data...
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent className="px-2 sm:p-6">
+          <div className="h-[250px] flex items-center justify-center text-muted-foreground">
+            Loading...
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
 
   return (
     <Card>

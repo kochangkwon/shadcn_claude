@@ -164,6 +164,12 @@ export function ApiUsageTable() {
   const [selectedItem, setSelectedItem] = React.useState<UsageData | null>(null)
   const [isSheetOpen, setIsSheetOpen] = React.useState(false)
 
+  // Memoize chart data generation to prevent flickering on every render
+  const detailChartData = React.useMemo(() => {
+    if (!selectedItem) return []
+    return generateDetailChartData()
+  }, [selectedItem?.id])
+
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
       setSelectedRows(new Set(data.map(item => item.id)))
@@ -326,7 +332,7 @@ export function ApiUsageTable() {
                 className="h-[200px] w-full"
               >
                 <AreaChart
-                  data={generateDetailChartData()}
+                  data={detailChartData}
                   margin={{
                     top: 10,
                     right: 10,

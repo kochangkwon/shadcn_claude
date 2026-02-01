@@ -25,8 +25,9 @@ export function LoginModal({ open, onOpenChange, onSwitchToSignup }: LoginModalP
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    // TODO: Implement login logic
-    console.log("Login:", { email, password })
+    // TODO: Implement actual authentication API call
+    // Example: await loginUser({ email, password })
+    onOpenChange(false)
   }
 
   const handleSwitchToSignup = () => {

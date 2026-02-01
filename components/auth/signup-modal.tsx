@@ -24,15 +24,21 @@ export function SignupModal({ open, onOpenChange, onSwitchToLogin }: SignupModal
   const [email, setEmail] = React.useState("")
   const [password, setPassword] = React.useState("")
   const [confirmPassword, setConfirmPassword] = React.useState("")
+  const [passwordError, setPasswordError] = React.useState("")
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    // TODO: Implement signup logic
+    setPasswordError("")
+
+    // Validate password match
     if (password !== confirmPassword) {
-      alert("Passwords do not match")
+      setPasswordError("Passwords do not match")
       return
     }
-    console.log("Signup:", { name, email, password })
+
+    // TODO: Implement actual authentication API call
+    // Example: await signupUser({ name, email, password })
+    onOpenChange(false)
   }
 
   const handleSwitchToLogin = () => {
@@ -94,9 +100,15 @@ export function SignupModal({ open, onOpenChange, onSwitchToLogin }: SignupModal
               type="password"
               placeholder="Confirm your password"
               value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
+              onChange={(e) => {
+                setConfirmPassword(e.target.value)
+                if (passwordError) setPasswordError("")
+              }}
               required
             />
+            {passwordError && (
+              <p className="text-sm font-medium text-destructive">{passwordError}</p>
+            )}
           </div>
 
           <Button type="submit" className="w-full">

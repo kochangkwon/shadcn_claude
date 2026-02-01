@@ -1,8 +1,14 @@
 {
-  "sessionCount": 3,
-  "lastSession": {
-    "startedAt": "2026-02-01T11:04:58.657Z",
-    "platform": "claude",
-    "level": "Dynamic"
-  }
+  "project": "shadcn-cluade",
+  "currentFeature": "api-usage-table-refactoring",
+  "phase": "plan",
+  "lastUpdated": "2026-02-01",
+  "activeFeatures": [
+    {
+      "name": "api-usage-table-refactoring",
+      "phase": "plan",
+      "planDocument": "docs/01-plan/features/api-usage-table-refactoring.plan.md",
+      "createdAt": "2026-02-01"
+    }
+  ]
 }

@@ -9,7 +9,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -17,9 +16,6 @@ import { GripVertical, TrendingUp, TrendingDown } from "lucide-react"
 import {
   Sheet,
   SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
 } from "@/components/ui/sheet"
 import { Separator } from "@/components/ui/separator"
 import { Input } from "@/components/ui/input"
@@ -33,131 +29,19 @@ import {
 } from "@/components/ui/select"
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import {
-  ChartConfig,
   ChartContainer,
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart"
 
-type UsageStatus = "active" | "warning" | "exceeded"
-
-interface UsageData {
-  id: string
-  type: string
-  status: UsageStatus
-  target: string
-  limit: string
-  reviewer: string
-}
-
-const initialData: UsageData[] = [
-  {
-    id: "1",
-    type: "GPT-4 Turbo",
-    status: "active",
-    target: "850K/1M",
-    limit: "1,000,000",
-    reviewer: "John Smith"
-  },
-  {
-    id: "2",
-    type: "Claude 3 Opus",
-    status: "active",
-    target: "620K/1M",
-    limit: "1,000,000",
-    reviewer: "Sarah Johnson"
-  },
-  {
-    id: "3",
-    type: "Gemini Pro",
-    status: "warning",
-    target: "890K/1M",
-    limit: "1,000,000",
-    reviewer: "Mike Chen"
-  },
-  {
-    id: "4",
-    type: "Text Embeddings",
-    status: "active",
-    target: "340K/500K",
-    limit: "500,000",
-    reviewer: "Emily Davis"
-  },
-  {
-    id: "5",
-    type: "GPT-3.5 Turbo",
-    status: "exceeded",
-    target: "1.05M/1M",
-    limit: "1,000,000",
-    reviewer: "Alex Kim"
-  },
-  {
-    id: "6",
-    type: "Whisper API",
-    status: "active",
-    target: "125K/250K",
-    limit: "250,000",
-    reviewer: "Lisa Park"
-  },
-  {
-    id: "7",
-    type: "DALL-E 3",
-    status: "warning",
-    target: "45K/50K",
-    limit: "50,000",
-    reviewer: "Tom Wilson"
-  },
-  {
-    id: "8",
-    type: "Custom Fine-tuned Model",
-    status: "active",
-    target: "78K/200K",
-    limit: "200,000",
-    reviewer: "Rachel Green"
-  }
-]
-
-// Generate chart data for detail view
-const generateDetailChartData = () => {
-  const data = []
-  const now = new Date()
-
-  for (let i = 6; i >= 0; i--) {
-    const date = new Date(now)
-    date.setDate(date.getDate() - i)
-
-    const baseValue = 20000 + Math.random() * 10000
-    const usage = Math.floor(baseValue)
-
-    data.push({
-      date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      usage,
-    })
-  }
-
-  return data
-}
-
-const detailChartConfig = {
-  usage: {
-    label: "API Calls",
-    color: "hsl(217, 91%, 60%)",
-  },
-} satisfies ChartConfig
-
-const getStatusBadge = (status: UsageStatus) => {
-  switch (status) {
-    case "active":
-      return <Badge variant="secondary" className="bg-green-500/10 text-green-500 hover:bg-green-500/20">Active</Badge>
-    case "warning":
-      return <Badge variant="secondary" className="bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20">Warning</Badge>
-    case "exceeded":
-      return <Badge variant="secondary" className="bg-red-500/10 text-red-500 hover:bg-red-500/20">Exceeded</Badge>
-  }
-}
+// Separated imports - Data Layer
+import type { UsageData } from "@/lib/types/dashboard"
+import { initialUsageData, generateDetailChartData } from "@/lib/mock/usage-data"
+import { getStatusBadge } from "@/lib/utils/status-badge"
+import { detailChartConfig } from "@/lib/constants/chart-configs"
 
 export function ApiUsageTable() {
-  const [data, setData] = React.useState(initialData)
+  const [data, setData] = React.useState(initialUsageData)
   const [selectedRows, setSelectedRows] = React.useState<Set<string>>(new Set())
   const [draggedItem, setDraggedItem] = React.useState<UsageData | null>(null)
   const [dragOverId, setDragOverId] = React.useState<string | null>(null)

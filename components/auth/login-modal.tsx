@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
+import { signIn } from "next-auth/react"
 
 interface LoginModalProps {
   open: boolean
@@ -22,12 +23,26 @@ interface LoginModalProps {
 export function LoginModal({ open, onOpenChange, onSwitchToSignup }: LoginModalProps) {
   const [email, setEmail] = React.useState("")
   const [password, setPassword] = React.useState("")
+  const [isLoading, setIsLoading] = React.useState(false)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     // TODO: Implement actual authentication API call
     // Example: await loginUser({ email, password })
     onOpenChange(false)
+  }
+
+  const handleGoogleSignIn = async () => {
+    try {
+      setIsLoading(true)
+      await signIn("google", {
+        callbackUrl: "/dashboard",
+      })
+    } catch (error) {
+      console.error("Google sign in error:", error)
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const handleSwitchToSignup = () => {
@@ -91,7 +106,12 @@ export function LoginModal({ open, onOpenChange, onSwitchToSignup }: LoginModalP
           </div>
 
           <div className="grid grid-cols-2 gap-4">
-            <Button variant="outline" type="button">
+            <Button
+              variant="outline"
+              type="button"
+              onClick={handleGoogleSignIn}
+              disabled={isLoading}
+            >
               <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
                 <path
                   d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -110,7 +130,7 @@ export function LoginModal({ open, onOpenChange, onSwitchToSignup }: LoginModalP
                   fill="#EA4335"
                 />
               </svg>
-              Google
+              {isLoading ? "Loading..." : "Google"}
             </Button>
             <Button variant="outline" type="button">
               <svg className="mr-2 h-4 w-4" fill="currentColor" viewBox="0 0 24 24">

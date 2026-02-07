@@ -12,8 +12,8 @@ import {
   Activity,
   Clock
 } from "lucide-react"
-import { InteractiveAreaChart } from "@/components/dashboard/interactive-area-chart"
-import { ApiUsageTable } from "@/components/dashboard/api-usage-table"
+import { InteractiveAreaChart } from "@/components/features/dashboard/interactive-area-chart"
+import { ApiUsageTable } from "@/components/features/dashboard/api-usage-table"
 
 export default function DashboardPage() {
   return (

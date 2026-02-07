@@ -7,7 +7,7 @@ import {
   Example,
   ExampleWrapper,
 } from "@/components/example"
-import { ThemeToggle } from "@/components/theme-toggle"
+import { ThemeToggle } from "@/components/common/theme-toggle"
 import {
   AlertDialog,
   AlertDialogAction,

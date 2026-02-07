@@ -141,10 +141,9 @@ export function InteractiveAreaChart() {
       <CardContent className="px-2 sm:p-6">
         <div className="mb-4 flex justify-end">
           <ToggleGroup
-            type="single"
-            value={timeRange}
-            onValueChange={(value) => {
-              if (value) setTimeRange(value as TimeRange)
+            value={[timeRange] as any}
+            onValueChange={(value: any) => {
+              if (value && value[0]) setTimeRange(value[0] as TimeRange)
             }}
             className="border border-border rounded-lg p-0.5"
           >

@@ -3,8 +3,8 @@
 import { useEffect } from "react"
 import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
-import { LoginModal } from "@/components/auth/login-modal"
-import { SignupModal } from "@/components/auth/signup-modal"
+import { LoginModal } from "@/components/features/auth-wizard/login-modal"
+import { SignupModal } from "@/components/features/auth-wizard/signup-modal"
 import * as React from "react"
 
 export default function Page() {

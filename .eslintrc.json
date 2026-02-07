@@ -1,0 +1,12 @@
+{
+  "extends": [
+    "next/core-web-vitals",
+    "next/typescript"
+  ],
+  "rules": {
+    "semi": ["error", "never"],
+    "no-unexpected-multiline": "error",
+    "@typescript-eslint/no-extra-semi": "error",
+    "no-extra-semi": "error"
+  }
+}

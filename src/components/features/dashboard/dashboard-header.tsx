@@ -3,11 +3,11 @@
 import * as React from "react"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Separator } from "@/components/ui/separator"
-import { ThemeToggle } from "@/components/theme-toggle"
+import { ThemeToggle } from "@/components/common/theme-toggle"
 import { Button } from "@/components/ui/button"
 import { User, LogOut, Mail, UserCircle } from "lucide-react"
-import { LoginModal } from "@/components/auth/login-modal"
-import { SignupModal } from "@/components/auth/signup-modal"
+import { LoginModal } from "@/components/features/auth-wizard/login-modal"
+import { SignupModal } from "@/components/features/auth-wizard/signup-modal"
 import {
   DropdownMenu,
   DropdownMenuContent,

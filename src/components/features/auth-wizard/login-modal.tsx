@@ -141,7 +141,7 @@ export function LoginModal({ open, onOpenChange, onSwitchToSignup }: LoginModalP
           </div>
 
           <div className="text-center text-sm">
-            Don't have an account?{" "}
+            Don&apos;t have an account?{" "}
             <Button
               variant="link"
               className="px-0 font-normal"

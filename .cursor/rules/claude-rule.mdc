@@ -1,1927 +1,738 @@
 ---
-description: Next.js 14 App Router 프로젝트 기본 개발 규칙
+description: Senior Guidelines 기반
 globs: ["**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx"]
 alwaysApply: true
 ---
 
-# Next.js 14 Full-Stack Development Rules
 
-You are an expert in JavaScript, TypeScript, React, Node.js, Next.js App Router, Zustand, Shadcn UI, Radix UI, and Tailwind CSS.
 
-## Tech Stack & Environment
+## Core Philosophy
 
-### Core Technologies
-- **Framework**: Next.js 14+ (App Router)
-- **Language**: TypeScript (strict mode)
-- **UI Library**: React 18+
-- **State Management**: Zustand
-- **UI Components**: Shadcn UI + Radix UI
-- **Styling**: Tailwind CSS + CSS Modules
-- **Backend**: Supabase (Auth, Database, Storage)
-- **Form Handling**: React Hook Form + Zod
-- **Server Actions**: Next.js Server Actions with useFormState
-- **URL State**: nuqs
+1. **Simplicity & Readability**: Code must be easy to read; complexity is intentionally isolated.
+2. **RSC-First Approach**: Leverage Server Components (RSC) by default to optimize bundle size; delegate only interactive parts to the client.
+3. **Type-Safe Everything**: Combine Zod and TypeScript to catch errors before runtime.
+4. **Functional & Pragmatic**: Favor immutability and pure functions without compromising practical productivity.
+5. **Fail Fast & Gracefully**: Detect errors early (Zod) and present them gracefully to users (Error Boundary).
+6. **Security by Default**: RLS policies, server-side auth validation, and environment variable protection are non-negotiable.
 
-### Environment Setup
-- Use `.env.local` for local development secrets
-- Use `.env` for non-sensitive defaults
-- Never commit secrets to version control
-- Prefix public environment variables with `NEXT_PUBLIC_`
-- **Validate environment variables with Zod at startup**
+---
+
+## 🏗️ 1. Architecture: RSC & Client Components
+
+Instead of making every component a client component, adopt the strategy of **fetching data on the server and handling interactions on the client**.
+
+- **Server Components (Default)**: Data fetching, security-critical logic, SEO-sensitive layouts.
+- **Client Components (`'use client'`)**: `useState`, `useEffect`, browser APIs, complex user interactions (Framer Motion, Shadcn UI, etc.).
+- **Server Actions**: Handle form submissions and data mutations directly without API Routes.
 
 ```typescript
-// lib/env.ts
-import { z } from 'zod'
-
-const envSchema = z.object({
-  // Public variables
-  NEXT_PUBLIC_SUPABASE_URL: z.string().url(),
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),
-  NEXT_PUBLIC_APP_URL: z.string().url().default('http://localhost:3000'),
-  
-  // Server-only variables
-  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
-  DATABASE_URL: z.string().url().optional()
-})
-
-// Parse and validate
-const parsed = envSchema.safeParse({
-  NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-  NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
-  SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
-  DATABASE_URL: process.env.DATABASE_URL
-})
-
-if (!parsed.success) {
-  console.error('❌ Invalid environment variables:', parsed.error.flatten().fieldErrors)
-  throw new Error('Invalid environment variables')
+// ✅ Structure Example
+// app/posts/page.tsx (Server Component)
+export default async function PostsPage() {
+  const posts = await getPosts() // Direct data fetching on the server
+  return <PostList posts={posts} />
 }
 
-export const env = parsed.data
-
-// Usage: import { env } from '@/lib/env'
+// components/PostList.tsx (Client Component)
+'use client'
+export function PostList({ posts }) {
+  const [filter, setFilter] = useState('')
+  // ... interactive logic
+}
 ```
+
+### Server Actions (Stable)
+
+Server Actions are stable in Next.js 15. Prefer Server Actions over API Routes.
+
+```typescript
+// app/actions/posts.ts
+'use server'
+
+import { createClient } from '@/lib/supabase/server'
+import { revalidatePath } from 'next/cache'
+
+export async function createPost(formData: FormData): Promise<Result<Post, string>> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+
+  if (!user) return { success: false, error: 'Authentication required.' }
+
+  const validated = postSchema.safeParse(Object.fromEntries(formData))
+  if (!validated.success) return { success: false, error: 'Invalid input.' }
+
+  const { data, error } = await supabase
+    .from('posts')
+    .insert({ ...validated.data, user_id: user.id })
+    .select()
+    .single()
+
+  if (error) return { success: false, error: 'Failed to create post.' }
+
+  revalidatePath('/posts')
+  return { success: true, data }
+}
+```
+
+### Partial Prerendering (PPR)
+
+Combine a static shell with dynamic content to maximize initial load speed.
+
+```typescript
+// app/dashboard/page.tsx
+import { Suspense } from 'react'
+import { DashboardShell } from '@/components/dashboard-shell'
+import { DynamicStats } from '@/components/dynamic-stats'
+
+export default function DashboardPage() {
+  return (
+    <DashboardShell>
+      <Suspense fallback={<StatsSkeleton />}>
+        <DynamicStats />
+      </Suspense>
+    </DashboardShell>
+  )
+}
+```
+
+---
+
+## 🛠️ 2. Supabase Workflow: SSR, Auth & Migration
+
+### @supabase/ssr Package (Required)
+
+`@supabase/auth-helpers-nextjs` is deprecated. Always use the **`@supabase/ssr`** package.
 
 ```bash
-# Example .env.local structure
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-DATABASE_URL=postgresql://...
+npm install @supabase/supabase-js @supabase/ssr
 ```
 
-## TypeScript Configuration
-
-### Type Safety Rules
-- Enable strict mode in tsconfig.json
-- Use explicit return types for functions
-- Avoid `any` type; use `unknown` when type is uncertain
-- Use type inference where possible
-- Define interfaces for component props, API responses, and data models
+### Supabase Client Setup
 
 ```typescript
-// ✅ Good
-interface UserProfile {
-  id: string
-  name: string
-  email: string
-  createdAt: Date
-}
-
-function fetchUser(id: string): Promise<UserProfile> {
-  // ...
-}
-
-// ❌ Bad
-function fetchUser(id: any): Promise<any> {
-  // ...
-}
-```
-
-### Type Organization
-- Place shared types in `types/` directory
-- Use `.d.ts` files for global type declarations
-- Co-locate component-specific types with components
-
-```
-types/
-  database.types.ts      # Supabase generated types
-  api.types.ts          # API request/response types
-  common.types.ts       # Shared utility types
-```
-
-## Code Style and Structure
-
-### Standard.js + TypeScript Rules
-- Use 2 space indentation
-- Use single quotes for strings (except to avoid escaping)
-- **No semicolons** (unless required to disambiguate)
-- No unused variables or imports
-- Add space after keywords and before function parentheses
-- Always use `===` instead of `==`
-- Space around infix operators
-- Commas with trailing space
-- Else on same line as closing brace
-- Multi-line if statements require braces
-- Handle all error parameters
-- Use camelCase for variables and functions
-- Use PascalCase for components and classes
-- Use UPPER_SNAKE_CASE for constants
-
-**CRITICAL - ESLint Configuration for No-Semicolon Style:**
-
-When using no-semicolon style, you MUST configure ESLint with `no-unexpected-multiline` rule to prevent ASI (Automatic Semicolon Insertion) issues:
-
-```json
-// .eslintrc.json
-{
-  "extends": [
-    "next/core-web-vitals",
-    "plugin:@typescript-eslint/recommended"
-  ],
-  "rules": {
-    "semi": ["error", "never"],
-    "no-unexpected-multiline": "error",
-    "@typescript-eslint/no-extra-semi": "error",
-    "no-extra-semi": "error"
-  }
-}
-```
-
-**Common ASI Pitfalls to Avoid:**
-
-```typescript
-// ❌ DANGER - Will be interpreted as one statement!
-const a = b
-(function() {})() // JavaScript thinks: const a = b(function() {})()
-
-// ✅ SAFE - Add semicolon when line starts with [ ( / + -
-const a = b
-;(function() {})()
-
-// Or better, avoid this pattern entirely:
-const a = b
-const iife = (function() {})()
-
-// ❌ DANGER - Array access interpreted as function call
-const value = getValue()
-[1, 2, 3].forEach(x => console.log(x)) // Interpreted as getValue()[1,2,3]
-
-// ✅ SAFE
-const value = getValue()
-;[1, 2, 3].forEach(x => console.log(x))
-
-// Or better:
-const value = getValue()
-const array = [1, 2, 3]
-array.forEach(x => console.log(x))
-```
-
-```typescript
-// ✅ Good - Proper Standard.js style
-const API_ENDPOINT = 'https://api.example.com'
-const isLoading = true
-const hasError = false
-
-function fetchData (userId: string) {
-  if (isLoading) return null
-  return fetch(`${API_ENDPOINT}/users/${userId}`)
-}
-
-// ❌ Bad - Against Standard.js rules
-const api_endpoint = 'https://api.example.com';
-const IsLoading = true;
-function fetchData(userId: string){
-  if(isLoading)
-    return null;
-  return fetch(api_endpoint+"/users/"+userId);
-}
-```
-
-### File and Directory Naming
-- **Directories**: lowercase with dashes (`auth-wizard`, `user-profile`)
-- **Components**: PascalCase files (`Button.tsx`, `UserCard.tsx`)
-- **Utilities**: camelCase files (`formatDate.ts`, `apiClient.ts`)
-- **Hooks**: camelCase with 'use' prefix (`useAuth.ts`, `useLocalStorage.ts`)
-- **Types**: PascalCase with '.types' suffix (`User.types.ts`)
-
-### File Structure Convention
-```
-project-root/
-  public/               # Static assets (OUTSIDE src/)
-    images/            # Images, logos
-    fonts/             # Custom fonts
-    favicon.ico        # Favicon
-    robots.txt         # SEO
-    
-  .eslintrc.json        # ESLint configuration (REQUIRED for no-semicolon style)
-  .prettierrc           # Prettier configuration (optional)
-  tsconfig.json         # TypeScript configuration
-  next.config.js        # Next.js configuration
-  tailwind.config.ts    # Tailwind configuration
-  
-src/
-  app/                  # Next.js App Router pages
-    (auth)/            # Route groups
-      login/
-        page.tsx
-      register/
-        page.tsx
-    api/               # API routes
-      users/
-        route.ts
-    actions/           # Server Actions
-      user.ts
-    layout.tsx
-    page.tsx
-    
-  components/          # Reusable components
-    ui/               # Shadcn UI components (installed via CLI)
-      button.tsx
-      dialog.tsx
-      form.tsx
-      
-    common/           # Shared components (simple, reusable)
-      Header.tsx
-      Footer.tsx
-      LoadingSpinner.tsx
-      
-    features/         # Feature-specific components (with colocation)
-      auth-wizard/    # Complex feature - colocate everything
-        UserForm.tsx
-        UserForm.module.css
-        SocialLoginButtons.tsx
-        StepIndicator.tsx
-        types.ts
-        utils.ts
-      dashboard/
-        StatsCard.tsx
-        StatsCard.module.css
-        ChartWidget.tsx
-        
-  hooks/              # Custom React hooks
-    useAuth.ts
-    useLocalStorage.ts
-    
-  lib/                # Utility functions and configurations
-    supabase/
-      client.ts       # Browser client
-      server.ts       # Server client
-      middleware.ts   # Middleware helper
-    env.ts            # Environment variable validation (Zod)
-    utils.ts          # Shared utilities (cn, formatters, etc.)
-    
-  stores/             # Zustand stores (UI state only)
-    uiStore.ts        # Theme, sidebar, modals
-    formStore.ts      # Multi-step form progress
-    
-  types/              # TypeScript type definitions
-    database.types.ts # Supabase generated types
-    api.types.ts      # API request/response types
-    common.types.ts   # Shared utility types
-    
-  styles/             # Global styles and CSS modules
-    globals.css       # Global styles and Tailwind imports
-```
-
-**File Placement Principles:**
-
-1. **Static Assets (public/):**
-   - All static files go in `public/` at project root (NOT in src/)
-   - Reference in code: `/images/logo.png` (absolute path from root)
-   - Next.js serves these files directly at root URL
-
-2. **Colocation Strategy (components/features/):**
-   - Simple components → `components/common/Button.tsx`
-   - Complex features → `components/features/feature-name/`
-   - Colocate feature-specific: components, styles, types, utils, hooks
-   - Benefits: Easy to find, move, delete entire features
-
-```typescript
-// ✅ Good - Colocation for complex features
-components/features/auth-wizard/
-  UserForm.tsx           // Main component
-  UserForm.module.css    // Component styles
-  SocialLoginButtons.tsx // Sub-component
-  StepIndicator.tsx      // Sub-component
-  types.ts               // Feature-specific types
-  utils.ts               // Feature-specific utilities
-  useAuthWizard.ts       // Feature-specific hook
-
-// ✅ Good - Common for simple reusable components
-components/common/
-  Button.tsx
-  Input.tsx
-  Card.tsx
-
-// ❌ Bad - Scattering feature files
-components/UserForm.tsx
-components/SocialLoginButtons.tsx
-utils/authWizardUtils.ts
-types/authWizardTypes.ts
-```
-
-3. **Import Patterns:**
-
-```typescript
-// Static assets from public/
-import Image from 'next/image'
-<Image src="/images/logo.png" alt="Logo" width={200} height={50} />
-
-// Feature components (colocation)
-import { UserForm } from '@/components/features/auth-wizard/UserForm'
-import { useAuthWizard } from '@/components/features/auth-wizard/useAuthWizard'
-
-// Common components
-import { Button } from '@/components/common/Button'
-import { Header } from '@/components/common/Header'
-
-// UI components (Shadcn)
-import { Button } from '@/components/ui/button'
-import { Dialog } from '@/components/ui/dialog'
-```
-
-### Component File Structure
-
-**Single File Component (Simple):**
-```typescript
-// components/common/LoadingSpinner.tsx
-
-import { cn } from '@/lib/utils'
-
-interface LoadingSpinnerProps {
-  size?: 'sm' | 'md' | 'lg'
-  className?: string
-}
-
-export function LoadingSpinner ({ size = 'md', className }: LoadingSpinnerProps) {
-  return (
-    <div className={cn('spinner', `spinner-${size}`, className)}>
-      <div className="animate-spin rounded-full border-t-2 border-blue-600" />
-    </div>
-  )
-}
-```
-
-**Colocated Feature Component (Complex):**
-```typescript
-// components/features/auth-wizard/UserForm.tsx
-
-import { useState } from 'react'
-import type { UserFormData } from './types'
-import { validateStep } from './utils'
-import { useAuthWizard } from './useAuthWizard'
-import { SocialLoginButtons } from './SocialLoginButtons'
-import { StepIndicator } from './StepIndicator'
-import styles from './UserForm.module.css'
-
-export function UserForm () {
-  // Hooks
-  const { currentStep, nextStep, prevStep } = useAuthWizard()
-  const [formData, setFormData] = useState<UserFormData>({})
-  
-  // Handlers
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    
-    if (!validateStep(currentStep, formData)) {
-      return
-    }
-    
-    await nextStep()
-  }
-  
-  // Render
-  return (
-    <div className={styles.container}>
-      <StepIndicator current={currentStep} total={3} />
-      
-      <form onSubmit={handleSubmit} className={styles.form}>
-        {/* Form fields */}
-      </form>
-      
-      <SocialLoginButtons />
-    </div>
-  )
-}
-
-// Sub-components (if small and only used here)
-function FormStep ({ step }: { step: number }) {
-  return <div>Step {step}</div>
-}
-```
-
-**When to Colocate:**
-- Feature has 3+ related files
-- Feature has its own types, utils, or hooks
-- Feature is self-contained and might be moved/removed as a unit
-
-**When NOT to Colocate:**
-- Simple, single-file components
-- Components used across many features
-- UI primitives (buttons, inputs, cards)
-
-**General Component Structure Pattern:**
-```typescript
-// 1. Imports (external first, internal second)
-import { useState } from 'react'
-import { Button } from '@/components/ui/button'
-import type { Props } from './Component.types'
-import styles from './Component.module.css'
-
-// 2. Types/Interfaces (if not in separate file)
-interface ComponentProps {
-  title: string
-}
-
-// 3. Main component export
-export function ComponentName ({ title }: ComponentProps) {
-  // 4. Hooks (in order: state, context, custom)
-  const [value, setValue] = useState('')
-  
-  // 5. Event handlers
-  const handleClick = () => {
-    setValue('clicked')
-  }
-  
-  // 6. Render
-  return (
-    <div className={styles.container}>
-      <h1>{title}</h1>
-      <button onClick={handleClick}>{value}</button>
-    </div>
-  )
-}
-
-// 7. Sub-components (if small and only used in this file)
-function SubComponent () {
-  return <div>Sub</div>
-}
-
-// 8. Helper functions (if small and only used in this file)
-function formatValue (val: string) {
-  return val.toUpperCase()
-}
-
-// 9. Constants (if only used in this file)
-const DEFAULT_VALUE = 'initial'
-```
-
-## React Best Practices
-
-### Component Patterns
-- Use functional components exclusively
-- Use `function` keyword for component definitions
-- Favor named exports over default exports
-- **Use TypeScript interfaces/types for all props** (no prop-types)
-- Follow composition over inheritance principle
-
-```typescript
-// ✅ Good - Named export with explicit types
-export function Button ({ label, onClick, variant = 'primary' }: ButtonProps) {
-  return <button onClick={onClick}>{label}</button>
-}
-
-// ❌ Bad - Default export with inline types
-export default ({ label, onClick }: { label: string, onClick: () => void }) => {
-  return <button onClick={onClick}>{label}</button>
-}
-```
-
-### Hooks Best Practices
-- Call hooks at top level only (never in conditions, loops, or nested functions)
-- Custom hooks must start with 'use' prefix
-- Extract reusable logic into custom hooks (>10 lines)
-- Use cleanup functions in useEffect to prevent memory leaks
-- Implement proper dependency arrays
-
-```typescript
-// ✅ Good - Custom hook with cleanup
-export function useWindowSize () {
-  const [size, setSize] = useState({ width: 0, height: 0 })
-  
-  useEffect(() => {
-    function handleResize () {
-      setSize({ width: window.innerWidth, height: window.innerHeight })
-    }
-    
-    window.addEventListener('resize', handleResize)
-    handleResize()
-    
-    return () => window.removeEventListener('resize', handleResize)
-  }, [])
-  
-  return size
-}
-
-// ❌ Bad - Missing cleanup, wrong dependencies
-function useWindowSize () {
-  const [size, setSize] = useState({ width: 0, height: 0 })
-  
-  useEffect(() => {
-    window.addEventListener('resize', () => {
-      setSize({ width: window.innerWidth, height: window.innerHeight })
-    })
-  })
-  
-  return size
-}
-```
-
-### Performance Optimization
-- Use React.memo() for expensive component renders
-- Implement useCallback for functions passed as props
-- Use useMemo for expensive computations
-- Avoid inline function definitions in render
-
-```typescript
-// ✅ Good
-const MemoizedComponent = memo(function ExpensiveComponent ({ data }: Props) {
-  const processedData = useMemo(() => {
-    return data.map(item => complexCalculation(item))
-  }, [data])
-  
-  const handleClick = useCallback(() => {
-    console.log('clicked')
-  }, [])
-  
-  return <div onClick={handleClick}>{processedData}</div>
-})
-
-// ❌ Bad
-function ExpensiveComponent ({ data }: Props) {
-  const processedData = data.map(item => complexCalculation(item))
-  
-  return <div onClick={() => console.log('clicked')}>{processedData}</div>
-}
-```
-
-### Conditional Rendering
-- Use short-circuit evaluation and ternary operators
-- Extract complex conditions into variables
-- Use early returns for cleaner code
-
-```typescript
-// ✅ Good
-export function UserProfile ({ user }: Props) {
-  if (!user) return null
-  
-  const isVerified = user.emailVerified && user.phoneVerified
-  
-  return (
-    <div>
-      {isVerified && <VerifiedBadge />}
-      {user.isPremium ? <PremiumFeatures /> : <BasicFeatures />}
-    </div>
-  )
-}
-
-// ❌ Bad
-export function UserProfile ({ user }: Props) {
-  return (
-    <div>
-      {user ? (
-        <div>
-          {user.emailVerified && user.phoneVerified ? <VerifiedBadge /> : null}
-          {user.isPremium ? <PremiumFeatures /> : <BasicFeatures />}
-        </div>
-      ) : null}
-    </div>
-  )
-}
-```
-
-## Next.js App Router Patterns
-
-### Server vs Client Components
-- Default to Server Components
-- Use 'use client' only when necessary:
-  - Browser APIs (localStorage, window, etc.)
-  - Event handlers (onClick, onChange, etc.)
-  - React hooks (useState, useEffect, etc.)
-  - Third-party libraries requiring browser context
-
-```typescript
-// ✅ Good - Server Component (default)
-export default async function UserPage ({ params }: Props) {
-  const user = await fetchUser(params.id)
-  return <UserProfile user={user} />
-}
-
-// ✅ Good - Client Component (when needed)
-'use client'
-
-export function InteractiveButton () {
-  const [count, setCount] = useState(0)
-  return <button onClick={() => setCount(count + 1)}>{count}</button>
-}
-
-// ❌ Bad - Unnecessary client component
-'use client'
-
-export default function UserPage ({ params }: Props) {
-  const user = fetchUser(params.id) // Should be server-side
-  return <UserProfile user={user} />
-}
-```
-
-### Data Fetching Patterns
-- Fetch data in Server Components
-- Use Suspense boundaries for loading states
-- Implement error boundaries for error handling
-- Use parallel data fetching when possible
-
-```typescript
-// ✅ Good - Parallel fetching
-export default async function DashboardPage () {
-  const [user, stats, activities] = await Promise.all([
-    fetchUser(),
-    fetchStats(),
-    fetchActivities()
-  ])
-  
-  return (
-    <Dashboard user={user} stats={stats} activities={activities} />
-  )
-}
-
-// ✅ Good - With Suspense
-export default function Page () {
-  return (
-    <Suspense fallback={<LoadingSkeleton />}>
-      <DataComponent />
-    </Suspense>
-  )
-}
-```
-
-### Route Handlers (API Routes)
-- Place in `app/api/` directory
-- Use proper HTTP methods and status codes
-- Implement error handling
-- Validate request data
-
-```typescript
-// app/api/users/route.ts
-import { NextRequest, NextResponse } from 'next/server'
-import { z } from 'zod'
-
-const userSchema = z.object({
-  name: z.string().min(1),
-  email: z.string().email()
-})
-
-export async function POST (request: NextRequest) {
-  try {
-    const body = await request.json()
-    const validatedData = userSchema.parse(body)
-    
-    const user = await createUser(validatedData)
-    
-    return NextResponse.json(user, { status: 201 })
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: 'Validation failed', details: error.errors },
-        { status: 400 }
-      )
-    }
-    
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
-  }
-}
-```
-
-## Supabase Integration
-
-### Client Setup
-- Use **@supabase/ssr** for both server and client
-- Create separate utility functions for browser and server contexts
-- Use Row Level Security (RLS) policies
-- Never expose service role key on client
-
-```typescript
-// lib/supabase/client.ts (Client Component용)
+// lib/supabase/client.ts (Browser Client)
 import { createBrowserClient } from '@supabase/ssr'
-import type { Database } from '@/types/database.types'
 
-export function createClient () {
-  return createBrowserClient<Database>(
+export function createClient() {
+  return createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 }
 
-// lib/supabase/server.ts (Server Component용)
-import { createServerClient, type CookieOptions } from '@supabase/ssr'
+// lib/supabase/server.ts (Server Client)
+import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
-import type { Database } from '@/types/database.types'
 
-export async function createServerSupabaseClient () {
+export async function createClient() {
   const cookieStore = await cookies()
 
-  return createServerClient<Database>(
+  return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll () {
+        getAll() {
           return cookieStore.getAll()
         },
-        setAll (cookiesToSet) {
+        setAll(cookiesToSet) {
           try {
-            cookiesToSet.forEach(({ name, value, options }) => {
+            cookiesToSet.forEach(({ name, value, options }) =>
               cookieStore.set(name, value, options)
-            })
-          } catch (error) {
-            // The `setAll` method was called from a Server Component.
-            // This can be ignored if you have middleware refreshing
-            // user sessions.
+            )
+          } catch {
+            // Ignored when called from a Server Component.
+            // Middleware handles session refresh.
           }
-        }
-      }
+        },
+      },
     }
   )
 }
+```
 
-// lib/supabase/middleware.ts (Middleware용)
+### Middleware (Session Refresh Required)
+
+Since Server Components cannot write cookies, the middleware must refresh session tokens.
+
+```typescript
+// lib/supabase/middleware.ts
 import { createServerClient } from '@supabase/ssr'
-import { type NextRequest, NextResponse } from 'next/server'
+import { NextResponse, type NextRequest } from 'next/server'
 
-export async function updateSession (request: NextRequest) {
-  let supabaseResponse = NextResponse.next({
-    request
-  })
+export async function updateSession(request: NextRequest) {
+  let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll () {
+        getAll() {
           return request.cookies.getAll()
         },
-        setAll (cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => {
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) =>
             request.cookies.set(name, value)
-          })
-          supabaseResponse = NextResponse.next({
-            request
-          })
-          cookiesToSet.forEach(({ name, value, options }) => {
+          )
+          supabaseResponse = NextResponse.next({ request })
+          cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options)
-          })
-        }
-      }
+          )
+        },
+      },
     }
   )
 
-  // IMPORTANT: Avoid writing any logic between createServerClient and
-  // supabase.auth.getUser(). A simple mistake could make it very hard to debug
-  // issues with users being randomly logged out.
-
-  const {
-    data: { user }
-  } = await supabase.auth.getUser()
-
-  // Protected routes logic here
-  if (!user && request.nextUrl.pathname.startsWith('/dashboard')) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/login'
-    return NextResponse.redirect(url)
-  }
-
-  // IMPORTANT: You *must* return the supabaseResponse object as it is. If you're
-  // creating a new response object with NextResponse.next() make sure to:
-  // 1. Pass the request in it, like so:
-  //    const myNewResponse = NextResponse.next({ request })
-  // 2. Copy over the cookies, like so:
-  //    myNewResponse.cookies.setAll(supabaseResponse.cookies.getAll())
-  // 3. Change the myNewResponse object to fit your needs, but avoid changing
-  //    the cookies!
-  // 4. Finally:
-  //    return myNewResponse
-  // If this is not done, you may be causing the browser and server to go out
-  // of sync and terminate the user's session prematurely!
+  // ⚠️ Always use getUser() — getSession() is NOT safe on the server
+  await supabase.auth.getUser()
 
   return supabaseResponse
 }
-```
 
-### Authentication Patterns
-- Handle auth state changes in middleware
-- Protect routes with proper checks
-- Implement proper session management
-
-```typescript
-// middleware.ts
+// middleware.ts (project root)
 import { updateSession } from '@/lib/supabase/middleware'
+import { type NextRequest } from 'next/server'
 
-export async function middleware (request: NextRequest) {
+export async function middleware(request: NextRequest) {
   return await updateSession(request)
 }
 
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * Feel free to modify this pattern to include more paths.
-     */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'
-  ]
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+  ],
 }
 ```
 
-### Database Queries
-- Use TypeScript types from Supabase CLI
-- Implement proper error handling
-- Use RLS policies instead of manual checks
+### Auth Validation Rules
 
 ```typescript
-// ✅ Good
-async function fetchUserPosts (userId: string) {
-  const supabase = await createServerSupabaseClient()
-  
-  const { data, error } = await supabase
-    .from('posts')
-    .select('id, title, content, created_at')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false })
-  
-  if (error) {
-    console.error('Failed to fetch posts:', error)
-    return []
-  }
-  
-  return data
-}
+// ⚠️ NEVER use getSession() for server-side auth
+// getSession() does not verify the cookie signature and can be spoofed
 
-// ❌ Bad
-async function fetchUserPosts (userId: string) {
-  const supabase = await createServerSupabaseClient()
-  const { data } = await supabase.from('posts').select('*')
-  return data.filter((post: any) => post.user_id === userId)
-}
+// ✅ Always use getUser() on the server
+const { data: { user } } = await supabase.auth.getUser()
+
+// ❌ Do NOT use getSession() on the server
+const { data: { session } } = await supabase.auth.getSession() // UNSAFE!
 ```
 
-## State Management with Zustand
+### Migration Workflow
 
-### Store Structure
-- Create focused, single-responsibility stores
-- Use TypeScript for type safety
-- Implement proper action naming
-- Avoid storing derived state
-- **CRITICAL: Zustand is ONLY for Client UI State, NOT for Server Data**
-
-**State Management Philosophy:**
-- **Client State (Zustand)**: UI state, user preferences, temporary form state, modal/drawer state
-- **Server State (NOT Zustand)**: Database data, API responses, user posts, product listings
-- **URL State (nuqs)**: Filters, pagination, search queries, tab selection
-
-```typescript
-// stores/uiStore.ts - ✅ Good: Client UI state
-import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
-
-interface UIState {
-  // UI-only state
-  sidebarOpen: boolean
-  theme: 'light' | 'dark'
-  notifications: boolean
-  
-  // Actions
-  toggleSidebar: () => void
-  setTheme: (theme: 'light' | 'dark') => void
-  toggleNotifications: () => void
-}
-
-export const useUIStore = create<UIState>()(
-  persist(
-    (set) => ({
-      sidebarOpen: true,
-      theme: 'light',
-      notifications: true,
-      toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
-      setTheme: (theme) => set({ theme }),
-      toggleNotifications: () => set((state) => ({ notifications: !state.notifications }))
-    }),
-    {
-      name: 'ui-storage'
-    }
-  )
-)
-
-// ❌ Bad: Server data in Zustand
-interface BadStore {
-  users: User[] // ❌ This is server data!
-  posts: Post[] // ❌ This should be fetched from server!
-  fetchUsers: () => void // ❌ Don't do this
-}
-
-// ✅ Good: Server data from Server Component or Server Action
-async function UsersPage() {
-  const users = await fetchUsers() // Server-side fetch
-  return <UserList users={users} />
-}
-
-// Or use Next.js cache
-const getUsers = cache(async () => {
-  const supabase = await createServerSupabaseClient()
-  const { data } = await supabase.from('users').select('*')
-  return data
-})
-```
-
-### Store Usage Best Practices
-- Use selectors to prevent unnecessary re-renders
-- Keep store logic pure
-- **NEVER mix server data with client state**
-- Use Zustand ONLY for UI state that needs to persist across components
-
-```typescript
-// ✅ Good - UI state with selector
-export function Sidebar () {
-  const isOpen = useUIStore((state) => state.sidebarOpen)
-  const toggle = useUIStore((state) => state.toggleSidebar)
-  
-  return (
-    <aside className={isOpen ? 'open' : 'closed'}>
-      <button onClick={toggle}>Toggle</button>
-    </aside>
-  )
-}
-
-// ❌ Bad - Selecting entire state (causes unnecessary re-renders)
-export function Sidebar () {
-  const { sidebarOpen, theme, notifications } = useUIStore() // Re-renders on ANY state change!
-  return <aside className={sidebarOpen ? 'open' : 'closed'} />
-}
-
-// ❌ VERY BAD - Server data in Zustand
-export function UsersList () {
-  const users = useUserStore((state) => state.users) // ❌ DON'T DO THIS
-  return <ul>{users.map(u => <li key={u.id}>{u.name}</li>)}</ul>
-}
-
-// ✅ Good - Server data from Server Component
-export async function UsersList () {
-  const users = await fetchUsers() // Fetch on server
-  return <ul>{users.map(u => <li key={u.id}>{u.name}</li>)}</ul>
-}
-
-// ✅ Good - URL state for filters (not Zustand!)
-'use client'
-import { useQueryState } from 'nuqs'
-
-export function ProductFilters () {
-  const [category, setCategory] = useQueryState('category')
-  const [sort, setSort] = useQueryState('sort')
-  
-  return (
-    <div>
-      <select value={category} onChange={(e) => setCategory(e.target.value)}>
-        <option value="all">All</option>
-        <option value="electronics">Electronics</option>
-      </select>
-    </div>
-  )
-}
-```
-
-**When to Use What:**
-
-| State Type | Tool | Example |
-|------------|------|---------|
-| UI Preferences | Zustand | Theme, sidebar state, modal open/closed |
-| Temporary Form Data | Zustand | Multi-step form progress (not submitted yet) |
-| Server Data | Server Components / Cache | Users, posts, products from database |
-| URL-based Filters | nuqs | Search, pagination, sorting, filters |
-| Component-local State | useState | Input values, hover state, local toggles |
-
-## UI and Styling
-
-### Tailwind CSS Best Practices
-- Use mobile-first approach
-- Create consistent spacing scale
-- Use Tailwind's design tokens
-- Implement dark mode with class strategy
-
-```typescript
-// ✅ Good - Mobile-first, semantic classes
-<div className="p-4 md:p-6 lg:p-8 bg-white dark:bg-gray-900">
-  <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold text-gray-900 dark:text-white">
-    Title
-  </h1>
-</div>
-
-// ❌ Bad - Desktop-first, magic numbers
-<div className="p-8 md:p-4 bg-white" style={{ padding: '32px' }}>
-  <h1 className="text-4xl md:text-2xl font-bold">Title</h1>
-</div>
-```
-
-### CSS Modules (for complex component-specific styles)
-- Use CSS Modules only when Tailwind utilities are insufficient
-- Co-locate with components
-- Use camelCase for class names
-- Leverage CSS custom properties for theming
-
-```css
-/* Button.module.css */
-.button {
-  padding: 0.75rem 1.5rem;
-  border-radius: 0.5rem;
-  font-weight: 600;
-  transition: all 0.2s;
-  cursor: pointer;
-}
-
-.primary {
-  background-color: var(--color-primary, #3b82f6);
-  color: white;
-}
-
-.primary:hover {
-  background-color: var(--color-primary-hover, #2563eb);
-  transform: translateY(-1px);
-}
-
-.secondary {
-  background-color: transparent;
-  color: var(--color-primary, #3b82f6);
-  border: 2px solid var(--color-primary, #3b82f6);
-}
-
-.secondary:hover {
-  background-color: var(--color-primary-light, #eff6ff);
-}
-```
-
-```typescript
-// Button.tsx
-import styles from './Button.module.css'
-import { cn } from '@/lib/utils'
-
-interface ButtonProps {
-  variant?: 'primary' | 'secondary'
-  children: React.ReactNode
-}
-
-export function Button ({ variant = 'primary', children }: ButtonProps) {
-  return (
-    <button className={cn(styles.button, styles[variant])}>
-      {children}
-    </button>
-  )
-}
-```
-
-### Hybrid Approach: Tailwind + CSS Modules
-- **Primary**: Use Tailwind for 90% of styling
-- **When to use CSS Modules**: Complex animations, pseudo-elements, highly custom designs
-- **Never use** `@apply` directive in CSS Modules
-
-```typescript
-// ✅ Good - Tailwind for layout, CSS Modules for complex interactions
-<button className={cn(
-  'px-4 py-2 rounded-lg font-semibold', // Tailwind utilities
-  styles.complexAnimation // CSS Module for animation
-)}>
-  Click me
-</button>
-
-// ❌ Bad - Overusing CSS Modules
-<button className={styles.button}>
-  Click me
-</button>
-
-/* Bad CSS Module */
-.button {
-  @apply px-4 py-2 rounded-lg font-semibold; /* Don't use @apply */
-}
-```
-
-### Shadcn UI Integration
-- Install components via CLI
-- Customize in components/ui
-- Maintain consistent theming
+1. **Local Development**: Run the local Docker DB via `supabase start`.
+2. **Migration First**: All schema changes are created as files via `supabase migration new [name]`.
+3. **Type Generation**: Always update types after schema changes.
 
 ```bash
-npx shadcn-ui@latest add button
-npx shadcn-ui@latest add form
-npx shadcn-ui@latest add dialog
+npm run supabase:gen
 ```
 
-## Forms and Validation
+### RLS (Row Level Security) Required
 
-### Server Actions Pattern (Recommended for Next.js 14+)
-- Use Server Actions for form submissions
-- Combine with useFormState (React 18) or useActionState (React 19+) and useFormStatus
-- Validate with Zod on both client and server
-- Return typed results for better UX
+Enable RLS on every table and configure appropriate policies.
 
-**React 19 Migration Note**: 
-In React 19+, `useFormState` is renamed to `useActionState` with enhanced features. When upgrading, simply replace:
-```typescript
-// React 18 / Next.js 14
-import { useFormState } from 'react-dom'
-const [state, formAction] = useFormState(serverAction, initialState)
+```sql
+-- ✅ Enable RLS on all tables
+ALTER TABLE posts ENABLE ROW LEVEL SECURITY;
 
-// React 19 / Next.js 15+
-import { useActionState } from 'react'
-const [state, formAction, isPending] = useActionState(serverAction, initialState)
-// Note: isPending is now included directly
+-- Read policy: only team members can view
+CREATE POLICY "Team members can view posts"
+  ON posts FOR SELECT
+  USING (
+    team_id IN (
+      SELECT team_id FROM team_members
+      WHERE user_id = auth.uid()
+    )
+  );
+
+-- Write policy: only the author can update
+CREATE POLICY "Authors can update own posts"
+  ON posts FOR UPDATE
+  USING (user_id = auth.uid());
 ```
 
+---
+
+## ⚠️ 3. Error Handling: Result Pattern & UX
+
+Instead of throwing exceptions, use the **Result Pattern** that explicitly returns success or failure.
+
+### Global Result Type
+
 ```typescript
-// app/actions/user.ts
-'use server'
+// src/types/common.types.ts
+export type Result<T, E = Error> =
+  | { success: true; data: T }
+  | { success: false; error: E }
+```
 
-import { z } from 'zod'
-import { revalidatePath } from 'next/cache'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+### Server Action Example
 
-const userSchema = z.object({
-  name: z.string().min(2, '이름은 최소 2자 이상이어야 합니다'),
-  email: z.string().email('올바른 이메일 주소를 입력해주세요'),
-  age: z.number().min(18, '18세 이상만 가입할 수 있습니다')
-})
-
-export type FormState = {
-  success: boolean
-  message: string
-  errors?: {
-    name?: string[]
-    email?: string[]
-    age?: string[]
-  }
-}
-
-export async function createUser (
-  prevState: FormState,
-  formData: FormData
-): Promise<FormState> {
-  // 1. Parse and validate form data
-  const rawData = {
-    name: formData.get('name'),
-    email: formData.get('email'),
-    age: Number(formData.get('age'))
-  }
-
-  const validated = userSchema.safeParse(rawData)
-
-  if (!validated.success) {
-    return {
-      success: false,
-      message: '입력값을 확인해주세요',
-      errors: validated.error.flatten().fieldErrors
-    }
-  }
-
-  // 2. Perform database operation
+```typescript
+export async function updateProfile(formData: FormData): Promise<Result<User, string>> {
   try {
-    const supabase = await createServerSupabaseClient()
-    
-    const { error } = await supabase
-      .from('users')
-      .insert(validated.data)
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { success: false, error: 'Authentication required.' }
 
-    if (error) throw error
+    const validated = profileSchema.safeParse(Object.fromEntries(formData))
+    if (!validated.success) return { success: false, error: 'Invalid input.' }
 
-    // 3. Revalidate and return success
-    revalidatePath('/users')
-    
-    return {
-      success: true,
-      message: '사용자가 성공적으로 생성되었습니다'
-    }
-  } catch (error) {
-    return {
-      success: false,
-      message: '사용자 생성에 실패했습니다'
-    }
+    const { data, error } = await supabase
+      .from('profiles')
+      .update(validated.data)
+      .eq('id', user.id)
+      .select()
+      .single()
+
+    if (error) return { success: false, error: 'Failed to update profile.' }
+
+    revalidatePath('/profile')
+    return { success: true, data }
+  } catch (e) {
+    return { success: false, error: 'A server error occurred.' }
   }
 }
 ```
 
-```typescript
-// app/users/UserForm.tsx
-'use client'
+---
 
-import { useFormState, useFormStatus } from 'react-dom'
-import { createUser, type FormState } from '@/app/actions/user'
+## 🔄 4. State Management & Optimistic UI
 
-const initialState: FormState = {
-  success: false,
-  message: ''
-}
+### Server State (React Query)
 
-function SubmitButton () {
-  const { pending } = useFormStatus()
-  
-  return (
-    <button
-      type="submit"
-      disabled={pending}
-      className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50"
-    >
-      {pending ? '저장 중...' : '저장'}
-    </button>
-  )
-}
-
-export function UserForm () {
-  const [state, formAction] = useFormState(createUser, initialState)
-
-  return (
-    <form action={formAction} className="space-y-4">
-      <div>
-        <label htmlFor="name" className="block text-sm font-medium">
-          이름
-        </label>
-        <input
-          type="text"
-          id="name"
-          name="name"
-          required
-          className="mt-1 block w-full rounded-md border px-3 py-2"
-        />
-        {state.errors?.name && (
-          <p className="mt-1 text-sm text-red-600">{state.errors.name[0]}</p>
-        )}
-      </div>
-
-      <div>
-        <label htmlFor="email" className="block text-sm font-medium">
-          이메일
-        </label>
-        <input
-          type="email"
-          id="email"
-          name="email"
-          required
-          className="mt-1 block w-full rounded-md border px-3 py-2"
-        />
-        {state.errors?.email && (
-          <p className="mt-1 text-sm text-red-600">{state.errors.email[0]}</p>
-        )}
-      </div>
-
-      <div>
-        <label htmlFor="age" className="block text-sm font-medium">
-          나이
-        </label>
-        <input
-          type="number"
-          id="age"
-          name="age"
-          required
-          className="mt-1 block w-full rounded-md border px-3 py-2"
-        />
-        {state.errors?.age && (
-          <p className="mt-1 text-sm text-red-600">{state.errors.age[0]}</p>
-        )}
-      </div>
-
-      {state.message && (
-        <div
-          className={cn(
-            'p-3 rounded-lg text-sm',
-            state.success 
-              ? 'bg-green-50 text-green-800' 
-              : 'bg-red-50 text-red-800'
-          )}
-        >
-          {state.message}
-        </div>
-      )}
-
-      <SubmitButton />
-    </form>
-  )
-}
-```
-
-### React Hook Form + Zod Pattern (Alternative for complex forms)
-- Use for forms with complex validation logic
-- Implement proper error handling
-- Show user-friendly error messages
-- Can be combined with Server Actions via onSubmit
+Use React Query for data fetching and actively employ **Optimistic Updates** for a better user experience.
 
 ```typescript
-import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { z } from 'zod'
-import { createUser } from '@/app/actions/user'
+// features/comments/hooks/useCreateComment.ts
+export function useCreateComment() {
+  const queryClient = useQueryClient()
 
-const userSchema = z.object({
-  name: z.string().min(2, '이름은 최소 2자 이상이어야 합니다'),
-  email: z.string().email('올바른 이메일 주소를 입력해주세요'),
-  age: z.number().min(18, '18세 이상만 가입할 수 있습니다')
-})
+  return useMutation({
+    mutationFn: createComment,
+    onMutate: async (newComment) => {
+      await queryClient.cancelQueries({ queryKey: ['comments'] })
+      const previousComments = queryClient.getQueryData(['comments'])
 
-type UserFormData = z.infer<typeof userSchema>
+      // Optimistically update the cache
+      queryClient.setQueryData(['comments'], (old) => [...old, newComment])
 
-export function UserFormWithHook () {
-  const {
-    register,
-    handleSubmit,
-    formState: { errors, isSubmitting }
-  } = useForm<UserFormData>({
-    resolver: zodResolver(userSchema)
+      return { previousComments }
+    },
+    onError: (err, newComment, context) => {
+      queryClient.setQueryData(['comments'], context.previousComments)
+      toast.error('Failed to create comment.')
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['comments'] })
+    }
   })
-
-  const onSubmit = async (data: UserFormData) => {
-    const formData = new FormData()
-    Object.entries(data).forEach(([key, value]) => {
-      formData.append(key, value.toString())
-    })
-
-    const result = await createUser({ success: false, message: '' }, formData)
-    
-    if (result.success) {
-      // Handle success (e.g., show toast, redirect)
-      console.log(result.message)
-    } else {
-      // Handle error
-      console.error(result.message)
-    }
-  }
-  
-  return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-      <div>
-        <label htmlFor="name" className="block text-sm font-medium">이름</label>
-        <input
-          {...register('name')}
-          id="name"
-          className="mt-1 block w-full rounded-md border px-3 py-2"
-        />
-        {errors.name && (
-          <span className="mt-1 text-sm text-red-600">{errors.name.message}</span>
-        )}
-      </div>
-      
-      <div>
-        <label htmlFor="email" className="block text-sm font-medium">이메일</label>
-        <input
-          {...register('email')}
-          id="email"
-          type="email"
-          className="mt-1 block w-full rounded-md border px-3 py-2"
-        />
-        {errors.email && (
-          <span className="mt-1 text-sm text-red-600">{errors.email.message}</span>
-        )}
-      </div>
-      
-      <div>
-        <label htmlFor="age" className="block text-sm font-medium">나이</label>
-        <input
-          {...register('age', { valueAsNumber: true })}
-          id="age"
-          type="number"
-          className="mt-1 block w-full rounded-md border px-3 py-2"
-        />
-        {errors.age && (
-          <span className="mt-1 text-sm text-red-600">{errors.age.message}</span>
-        )}
-      </div>
-      
-      <button
-        type="submit"
-        disabled={isSubmitting}
-        className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50"
-      >
-        {isSubmitting ? '저장 중...' : '저장'}
-      </button>
-    </form>
-  )
 }
 ```
 
-### Form Validation Strategy
-- **Server Actions (Primary)**: For simple forms, better progressive enhancement
-- **React Hook Form (Advanced)**: For complex multi-step forms, dynamic fields
-- **Always validate on server**: Never trust client-side validation alone
+### Client-Only UI State (Zustand)
 
 ```typescript
-// ✅ Good - Validate on both client and server
-// Client (optional but better UX)
-const schema = z.object({ email: z.string().email() })
+// stores/ui.store.ts
+// Zustand is used ONLY for UI state (sidebar toggle, modals, etc.)
+import { create } from 'zustand'
 
-// Server (required)
-'use server'
-export async function submitForm(formData: FormData) {
-  const validated = schema.safeParse({ email: formData.get('email') })
-  if (!validated.success) {
-    return { error: 'Invalid email' }
-  }
-  // ... process
+interface UIStore {
+  sidebarOpen: boolean
+  toggleSidebar: () => void
 }
 
-// ❌ Bad - Client-only validation
-function handleSubmit(data) {
-  if (!isValidEmail(data.email)) return
-  // Directly save without server validation
-}
+export const useUIStore = create<UIStore>((set) => ({
+  sidebarOpen: false,
+  toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
+}))
 ```
 
-## Error Handling and Validation
+---
 
-### Error-First Approach
-- Handle errors at function start
-- Use early returns
-- Avoid deep nesting
-- Log errors appropriately
+## 🚦 5. Loading & Error Boundaries
 
-```typescript
-// ✅ Good - Error-first with early returns
-async function processUserData (userId: string) {
-  if (!userId) {
-    console.error('User ID is required')
-    return { success: false, error: 'Invalid user ID' }
-  }
-  
-  const user = await fetchUser(userId)
-  if (!user) {
-    console.error(`User not found: ${userId}`)
-    return { success: false, error: 'User not found' }
-  }
-  
-  if (!user.isActive) {
-    console.warn(`Inactive user attempted access: ${userId}`)
-    return { success: false, error: 'User account is inactive' }
-  }
-  
-  // Happy path
-  const result = await processData(user)
-  return { success: true, data: result }
-}
+Use the built-in features of the Next.js App Router for declarative UX management.
 
-// ❌ Bad - Nested if statements
-async function processUserData (userId: string) {
-  if (userId) {
-    const user = await fetchUser(userId)
-    if (user) {
-      if (user.isActive) {
-        const result = await processData(user)
-        return { success: true, data: result }
-      } else {
-        return { success: false, error: 'User account is inactive' }
-      }
-    } else {
-      return { success: false, error: 'User not found' }
-    }
-  } else {
-    return { success: false, error: 'Invalid user ID' }
-  }
-}
-```
-
-### Error Boundaries
-- Implement at appropriate levels
-- Provide fallback UI
-- Log errors for monitoring
+- **`loading.tsx`**: Provides skeleton UI for pages while data is being fetched.
+- **`error.tsx`**: Offers recovery options (Try Again) for unexpected runtime errors.
+- **`not-found.tsx`**: Provides a custom 404 page for non-existent resources.
+- **`Suspense`**: Used for component-level loading instead of full-page loading.
 
 ```typescript
+// app/dashboard/error.tsx
 'use client'
 
-import { Component, type ReactNode } from 'react'
-
-interface Props {
-  children: ReactNode
-  fallback?: ReactNode
-}
-
-interface State {
-  hasError: boolean
-  error?: Error
-}
-
-export class ErrorBoundary extends Component<Props, State> {
-  constructor (props: Props) {
-    super(props)
-    this.state = { hasError: false }
-  }
-  
-  static getDerivedStateFromError (error: Error): State {
-    return { hasError: true, error }
-  }
-  
-  componentDidCatch (error: Error, errorInfo: any) {
-    console.error('Error caught by boundary:', error, errorInfo)
-    // Send to error tracking service
-  }
-  
-  render () {
-    if (this.state.hasError) {
-      return this.props.fallback || (
-        <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-          <h2 className="text-lg font-semibold text-red-900">문제가 발생했습니다</h2>
-          <p className="text-red-700">페이지를 새로고침해주세요.</p>
-        </div>
-      )
-    }
-    
-    return this.props.children
-  }
-}
-```
-
-## Performance Optimization
-
-### Image Optimization
-- Use Next.js Image component
-- Provide proper sizes
-- Use WebP format
-- Implement lazy loading
-
-```typescript
-import Image from 'next/image'
-
-// ✅ Good
-<Image
-  src="/profile.jpg"
-  alt="User profile"
-  width={200}
-  height={200}
-  sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-  priority={false}
-  loading="lazy"
-/>
-
-// ❌ Bad
-<img src="/profile.jpg" alt="User profile" />
-```
-
-### Code Splitting
-- Use dynamic imports for heavy components
-- Implement route-based splitting
-- Lazy load below-fold content
-
-```typescript
-import dynamic from 'next/dynamic'
-
-// ✅ Good - Dynamic import with loading state
-const HeavyChart = dynamic(() => import('./HeavyChart'), {
-  loading: () => <ChartSkeleton />,
-  ssr: false
-})
-
-export function Dashboard () {
+export default function DashboardError({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string }
+  reset: () => void
+}) {
   return (
-    <div>
-      <h1>Dashboard</h1>
-      <Suspense fallback={<ChartSkeleton />}>
-        <HeavyChart />
-      </Suspense>
+    <div className="flex flex-col items-center gap-4 p-8">
+      <h2 className="text-lg font-semibold">Something went wrong</h2>
+      <p className="text-muted-foreground">{error.message}</p>
+      <Button onClick={() => reset()}>Try Again</Button>
     </div>
   )
 }
 ```
 
-### Web Vitals Optimization
-- Monitor LCP (Largest Contentful Paint)
-- Optimize CLS (Cumulative Layout Shift)
-- Improve FID/INP (First Input Delay / Interaction to Next Paint)
+---
 
-```typescript
-// app/layout.tsx
-export const metadata = {
-  title: 'My App',
-  description: 'App description'
+## 🎨 6. Standard UI Guidelines
+
+- **Shadcn UI**: Primary UI component library. Customize as needed.
+- **Tailwind CSS**: Utility-first styling. Use CSS Modules only for complex animations.
+- **Icons**: `lucide-react` as the standard icon library.
+- **Placeholders**: Use `https://picsum.photos/` for image testing.
+- **Toast Notifications**: Use `sonner` for user feedback.
+- **Dark Mode**: Integrate with system preferences via `next-themes`.
+
+---
+
+## 📝 7. Code Style (Standard.js + TS)
+
+- **No Semicolons**: Do not use semicolons. (Watch out for ASI edge cases)
+- **Single Quotes**: Use single quotes for strings.
+- **Indentation**: 2-space indent.
+- **Naming**:
+  - Features: `kebab-case` (e.g., `auth-wizard`)
+  - Components: `PascalCase`
+  - Functions/Variables: `camelCase`
+  - Environment Variables: `UPPER_SNAKE_CASE`
+  - Types/Interfaces: `PascalCase` (no `I` prefix)
+- **Import Order**:
+  1. React / Next.js
+  2. External libraries
+  3. Internal modules (`@/`)
+  4. Types
+- **ESLint Config**:
+
+```json
+{
+  "rules": {
+    "semi": ["error", "never"],
+    "no-unexpected-multiline": "error"
+  }
 }
-
-// Preload critical resources
-export default function RootLayout ({ children }: Props) {
-  return (
-    <html lang="ko">
-      <head>
-        <link
-          rel="preload"
-          href="/fonts/inter-var.woff2"
-          as="font"
-          type="font/woff2"
-          crossOrigin="anonymous"
-        />
-      </head>
-      <body>{children}</body>
-    </html>
-  )
-}
 ```
 
-## Accessibility (a11y)
+> **Note**: `next lint` has been deprecated since Next.js 15.5. Use the ESLint CLI directly.
+> ```bash
+> npx @next/codemod@canary upgrade latest  # automated migration
+> ```
 
-### Semantic HTML
-- Use appropriate HTML elements
-- Implement proper heading hierarchy
-- Add ARIA attributes when needed
+---
 
-```typescript
-// ✅ Good
-<nav aria-label="Main navigation">
-  <ul>
-    <li><a href="/">Home</a></li>
-    <li><a href="/about">About</a></li>
-  </ul>
-</nav>
+## 🧪 8. Testing Strategy
 
-<main>
-  <h1>Page Title</h1>
-  <section aria-labelledby="section-heading">
-    <h2 id="section-heading">Section Title</h2>
-  </section>
-</main>
+### Testing Tools
 
-// ❌ Bad
-<div className="nav">
-  <div className="nav-item">Home</div>
-  <div className="nav-item">About</div>
-</div>
+| Level | Tool | Target |
+|-------|------|--------|
+| Unit | **Vitest** + React Testing Library | Client Components, utility functions, hooks |
+| E2E | **Playwright** | Full user flows, Server Components |
 
-<div>
-  <div className="title">Page Title</div>
-  <div className="section">
-    <div className="section-title">Section Title</div>
-  </div>
-</div>
+### Installation & Setup
+
+```bash
+# Unit Tests
+npm install -D vitest @vitejs/plugin-react jsdom @testing-library/react @testing-library/dom vite-tsconfig-paths
+
+# E2E Tests
+npm init playwright@latest
 ```
 
-### Keyboard Navigation
-- Ensure all interactive elements are keyboard accessible
-- Implement proper focus management
-- Add visible focus indicators
-
 ```typescript
-// ✅ Good
-<button
-  onClick={handleClick}
-  onKeyDown={(e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      handleClick()
-    }
-  }}
-  className="focus:ring-2 focus:ring-blue-500 focus:outline-none"
->
-  Click me
-</button>
-```
+// vitest.config.mts
+import { defineConfig } from 'vitest/config'
+import react from '@vitejs/plugin-react'
+import tsconfigPaths from 'vite-tsconfig-paths'
 
-## Testing
-
-### Unit Testing with Jest + React Testing Library
-- Test user behavior, not implementation
-- Use accessible queries
-- Avoid testing implementation details
-
-```typescript
-import { render, screen, fireEvent } from '@testing-library/react'
-import { Button } from './Button'
-
-describe('Button', () => {
-  it('should call onClick when clicked', () => {
-    const handleClick = jest.fn()
-    render(<Button onClick={handleClick}>Click me</Button>)
-    
-    const button = screen.getByRole('button', { name: /click me/i })
-    fireEvent.click(button)
-    
-    expect(handleClick).toHaveBeenCalledTimes(1)
-  })
-  
-  it('should be disabled when disabled prop is true', () => {
-    render(<Button disabled>Click me</Button>)
-    
-    const button = screen.getByRole('button', { name: /click me/i })
-    expect(button).toBeDisabled()
-  })
+export default defineConfig({
+  plugins: [tsconfigPaths(), react()],
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./tests/setup.ts'],
+    include: ['**/*.test.{ts,tsx}'],
+  },
 })
 ```
 
-## Security Best Practices
-
-### Input Sanitization
-- Sanitize user inputs
-- Use parameterized queries
-- Validate on both client and server
+### Test Writing Rules
 
 ```typescript
-import DOMPurify from 'isomorphic-dompurify'
+// ✅ Unit Test: Client Component
+import { expect, test } from 'vitest'
+import { render, screen } from '@testing-library/react'
+import { PostCard } from '@/features/posts/components/PostCard'
 
-// ✅ Good
-function displayUserContent (content: string) {
-  const sanitized = DOMPurify.sanitize(content)
-  return <div dangerouslySetInnerHTML={{ __html: sanitized }} />
-}
+test('PostCard renders title correctly', () => {
+  render(<PostCard title="Test Post" />)
+  expect(screen.getByText('Test Post')).toBeDefined()
+})
 
-// ❌ Bad
-function displayUserContent (content: string) {
-  return <div dangerouslySetInnerHTML={{ __html: content }} />
-}
+// ✅ E2E Test: Full Flow (Playwright)
+import { test, expect } from '@playwright/test'
+
+test('user can create a new post', async ({ page }) => {
+  await page.goto('/dashboard')
+  await page.click('text=New Post')
+  await page.fill('[name="title"]', 'Test Title')
+  await page.click('text=Save')
+  await expect(page.locator('text=Test Title')).toBeVisible()
+})
 ```
 
-### Authentication & Authorization
-- Never trust client-side auth state
-- Verify on server
-- Use proper session management
+### Test File Structure
+
+```
+tests/
+  setup.ts              # Vitest global setup
+  e2e/                  # Playwright E2E tests
+    auth.spec.ts
+    dashboard.spec.ts
+src/
+  features/
+    posts/
+      components/
+        PostCard.test.tsx   # Unit test (colocated)
+      hooks/
+        useCreatePost.test.ts
+```
+
+> **Note**: Async Server Components are not yet supported by Vitest. Use Playwright E2E tests to verify async components.
+
+---
+
+## 🔒 9. Security
+
+### Environment Variable Management
 
 ```typescript
-// app/api/admin/route.ts
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+// lib/env.ts — Environment variable validation with Zod
+import { z } from 'zod'
 
-export async function GET () {
-  const supabase = await createServerSupabaseClient()
-  
+const envSchema = z.object({
+  NEXT_PUBLIC_SUPABASE_URL: z.string().url(),
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
+  // Client-exposed variables MUST have the NEXT_PUBLIC_ prefix
+})
+
+export const env = envSchema.parse(process.env)
+```
+
+### Security Checklist
+
+- **RLS Required**: Enable Row Level Security on every Supabase table. Data is inaccessible without policies.
+- **Server Auth**: Use only `supabase.auth.getUser()`. Never use `getSession()` on the server.
+- **Service Role Key**: Never expose to the client. Use only in Server Actions or API Routes.
+- **Input Validation**: Validate all user input with Zod schemas.
+- **CSRF**: Server Actions are automatically protected by Next.js. API Routes require separate handling.
+- **Rate Limiting**: Apply rate limiting to critical APIs (via Supabase Edge Functions or middleware).
+
+### Auth Protection Pattern
+
+```typescript
+// app/(protected)/layout.tsx
+import { redirect } from 'next/navigation'
+import { createClient } from '@/lib/supabase/server'
+
+export default async function ProtectedLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  
+
   if (!user) {
-    return new Response('Unauthorized', { status: 401 })
+    redirect('/login')
   }
-  
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', user.id)
-    .single()
-  
-  if (profile?.role !== 'admin') {
-    return new Response('Forbidden', { status: 403 })
-  }
-  
-  // Admin-only logic
-  return new Response('Admin access granted', { status: 200 })
+
+  return <>{children}</>
 }
 ```
 
-## Internationalization (i18n)
+---
 
-### Next-intl Setup
-- Use next-intl for i18n
-- Structure translations properly
-- Support Korean and English
+## 🚀 10. Deployment & CI/CD
 
-```typescript
-// i18n.ts
-import { getRequestConfig } from 'next-intl/server'
+### Vercel Deployment
 
-export default getRequestConfig(async ({ locale }) => ({
-  messages: (await import(`./messages/${locale}.json`)).default
-}))
+```bash
+# next.config.ts
+import type { NextConfig } from 'next'
 
-// messages/ko.json
-{
-  "common": {
-    "submit": "제출",
-    "cancel": "취소"
+const nextConfig: NextConfig = {
+  experimental: {
+    typedRoutes: true,  // Stable since Next.js 15.5
   },
-  "auth": {
-    "login": "로그인",
-    "logout": "로그아웃"
-  }
 }
 
-// messages/en.json
-{
-  "common": {
-    "submit": "Submit",
-    "cancel": "Cancel"
-  },
-  "auth": {
-    "login": "Login",
-    "logout": "Logout"
-  }
-}
+export default nextConfig
 ```
 
-## Documentation Standards
+### Environment Variable Configuration
 
-### Component Documentation
-- Add JSDoc comments for complex components
-- Document props with descriptions
-- Include usage examples
+| Environment | Description |
+|-------------|-------------|
+| `development` | `.env.local` (local only, excluded from Git) |
+| `preview` | Vercel Preview environment variables |
+| `production` | Vercel Production environment variables |
 
-```typescript
-/**
- * A customizable button component that supports multiple variants and sizes.
- * 
- * @example
- * ```tsx
- * <Button variant="primary" size="lg" onClick={handleClick}>
- *   Click me
- * </Button>
- * ```
- */
-export function Button ({
-  /** The visual style variant */
-  variant = 'primary',
-  /** The size of the button */
-  size = 'md',
-  /** Click event handler */
-  onClick,
-  /** Button content */
-  children
-}: ButtonProps) {
-  return (
-    <button
-      className={`btn btn-${variant} btn-${size}`}
-      onClick={onClick}
-    >
-      {children}
-    </button>
-  )
-}
+### CI/CD Pipeline (GitHub Actions)
+
+```yaml
+# .github/workflows/ci.yml
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+      - run: npm ci
+      - run: npx eslint . --max-warnings 0
+      - run: npm run build
+      - run: npx vitest run
+      - run: npx playwright install --with-deps
+      - run: npx playwright test
+
+  type-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+      - run: npm ci
+      - run: npx tsc --noEmit
+
+  supabase-migration:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+      - run: supabase db push
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
 ```
 
-## Git Commit Conventions
+### Branch Strategy
 
-### Commit Message Format
-Use conventional commits format:
+- `main`: Production (auto-deploy)
+- `dev`: Development (Preview deploy)
+- `feature/*`: Feature branches (PR → merge into dev)
+
+---
+
+## 📂 11. Updated Directory Structure
 
 ```
-<type>(<scope>): <subject>
+src/
+  app/                    # Next.js App Router (RSC by default)
+    (auth)/               # Auth-related Route Group
+      login/
+      signup/
+    (protected)/          # Auth-required Route Group
+      dashboard/
+      settings/
+    api/                  # API Routes (when needed)
+    actions/              # Shared Server Actions
+    layout.tsx
+    page.tsx
+    loading.tsx           # Global Loading
+    error.tsx             # Global Error Boundary
+    not-found.tsx         # Global 404
 
-<body>
+  features/               # Feature-based modules (self-contained)
+    [feature-name]/
+      components/         # Mark 'use client' when needed
+        FeatureCard.tsx
+        FeatureCard.test.tsx  # Colocated unit test
+      hooks/
+      actions.ts          # Feature-specific Server Actions
+      api.ts              # React Query fetchers
+      types.ts
+      schema.ts           # Zod validation schemas
 
-<footer>
+  components/
+    ui/                   # Shadcn UI
+    common/               # Shared presentational components
+
+  lib/
+    supabase/
+      client.ts           # Browser client (@supabase/ssr)
+      server.ts           # Server client (@supabase/ssr)
+      middleware.ts        # Session refresh
+    env.ts                # Zod Env Validation
+    utils.ts              # cn() and shared utilities
+
+  stores/                 # Zustand (UI State Only!)
+  types/
+    database.types.ts     # Supabase Generated
+    common.types.ts       # Result, Pagination, and shared types
+
+tests/
+  setup.ts                # Vitest setup
+  e2e/                    # Playwright E2E tests
+
+middleware.ts             # Next.js Middleware (Supabase session refresh)
 ```
 
-**Types:**
-- `feat`: New feature
-- `fix`: Bug fix
-- `docs`: Documentation changes
-- `style`: Code style changes (formatting, etc.)
-- `refactor`: Code refactoring
-- `test`: Adding or updating tests
-- `chore`: Maintenance tasks
+---
 
-**Examples:**
-```
-feat(auth): add social login with Google
-fix(dashboard): resolve stats calculation error
-docs(readme): update setup instructions
-refactor(api): simplify error handling logic
-```
+## ✅ Final Checklist
 
-## Key Conventions Summary
+1. [ ] **RSC vs Client**: Are non-interactive pages/components Server Components?
+2. [ ] **Zod Env**: Have new environment variables been registered in `lib/env.ts`?
+3. [ ] **Supabase Migration**: Have DB schema changes been created as migration files?
+4. [ ] **RLS Policy**: Is RLS enabled on new tables with appropriate policies?
+5. [ ] **Auth**: Is `getUser()` used on the server? (`getSession()` is forbidden)
+6. [ ] **Error Handling**: Is the `Result` pattern applied in Server Actions?
+7. [ ] **Optimistic UI**: Are optimistic updates applied for key actions (likes, comments, etc.)?
+8. [ ] **Validation**: Is Zod schema validation applied to all user inputs?
+9. [ ] **Tests**: Have Unit/E2E tests been written for key features?
+10. [ ] **No Semi**: Is the code free of unnecessary semicolons?
+11. [ ] **Korean UTF-8**: Has Korean text been verified to render correctly?
+12. [ ] **Security Review**: Is the Service Role Key confirmed not exposed to the client?
 
-1. **Minimize client-side code**: Favor Server Components and Server Actions
-2. **Type safety first**: Use TypeScript strict mode everywhere
-3. **Environment validation**: Validate env variables with Zod at startup (lib/env.ts)
-4. **Modern forms**: Use Server Actions with useFormState (React 18) or useActionState (React 19+)
-5. **Supabase SSR**: Use @supabase/ssr for all auth operations
-6. **State management separation**: 
-   - **Zustand**: UI state only (theme, sidebar, modals)
-   - **Server State**: Next.js cache, Server Components
-   - **URL State**: nuqs (filters, pagination, search)
-7. **File organization**:
-   - **Static assets**: `public/` (outside src/) for images, fonts, favicons
-   - **Colocation**: Group related files in `features/feature-name/` folders
-   - **Separation**: Simple reusables in `common/`, primitives in `ui/`
-8. **No-semicolon style**: Configure ESLint with `no-unexpected-multiline` rule (CRITICAL)
-9. **Error handling**: Handle errors early, use guard clauses
-10. **Performance**: Lazy load, code split, optimize images
-11. **Styling**: Tailwind first (90%), CSS Modules for complex cases only (10%)
-12. **Accessibility**: Semantic HTML, keyboard navigation, ARIA
-13. **Security**: Sanitize inputs, validate server-side, use RLS
-14. **Testing**: Test behavior, not implementation
-15. **Documentation**: Document complex logic and components
-16. **Consistency**: Follow naming conventions and file structure
+---
 
-**File Placement Quick Reference:**
-```
-public/              → Static assets (images, fonts, favicon)
-src/components/ui/   → Shadcn components (installed via CLI)
-src/components/common/ → Simple shared components
-src/components/features/ → Complex features with colocation
-src/lib/env.ts       → Environment variable validation
-src/stores/          → Zustand UI state only
-```
+## 📋 Changelog (v2.0 → v3.0)
 
-**React 19 / Next.js 15 Future-Proofing:**
-- Current: `useFormState` from 'react-dom'
-- Future: `useActionState` from 'react' (with built-in isPending)
-- Migration is a simple rename when upgrading
+### New Sections
+- **§8 Testing Strategy**: Added Vitest + Playwright testing strategy
+- **§9 Security**: Added RLS enforcement, auth validation, env protection, and security checklist
+- **§10 Deployment & CI/CD**: Added Vercel deployment, GitHub Actions pipeline, and branch strategy
 
-**Why This Matters:**
-- **env.ts validation**: Prevents 99% of "deployment crashes" from missing env vars
-- **Zustand UI-only**: Prevents hydration mismatch bugs as project scales
-- **Colocation**: Makes features easy to find, move, or delete as a unit
-- **public/ placement**: Follows Next.js conventions for optimal static serving
+### Major Changes
+- **§1 Architecture**: Added Server Actions (stable) section and Partial Prerendering (PPR) pattern
+- **§2 Supabase**: Full migration to `@supabase/ssr` package; detailed cookie-based auth setup; added middleware session refresh pattern; added `getUser()` vs `getSession()` security warning; enforced RLS policies
+- **§5 Loading**: Added `not-found.tsx` and `error.tsx` code examples
+- **§6 UI**: Added `sonner` (toast) and `next-themes` (dark mode)
+- **§7 Code Style**: Added import order rules and type naming conventions; noted `next lint` deprecation
+- **§11 Directory**: Added `(protected)/` Route Group, `schema.ts`, `actions.ts`; added `tests/` directory
+- **Final Checklist**: Expanded from 7 to 12 items (RLS, Auth, Validation, Tests, Security)
 
-## Additional Resources
+---
 
-- Next.js Documentation: https://nextjs.org/docs
-- React Documentation: https://react.dev
-- TypeScript Documentation: https://www.typescriptlang.org/docs
-- Supabase Documentation: https://supabase.com/docs
-- Tailwind CSS Documentation: https://tailwindcss.com/docs
-- Shadcn UI: https://ui.shadcn.com
+**This guide is written for Next.js 15.x, @supabase/ssr, and Turbopack (as of 2025). All code must adhere to these rules. Consult the team before making any exceptions.**
